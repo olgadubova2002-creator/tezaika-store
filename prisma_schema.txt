@@ -1,0 +1,148 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Пользователи и связка соцсетей (SSO)
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  phone         String?   @unique
+  name          String?
+  avatarUrl     String?
+  role          UserRole  @default(CLIENT) // CLIENT, ADMIN
+  
+  // Внешние ID авторизации
+  vkId          String?   @unique
+  sberId        String?   @unique
+  mtsId         String?   @unique
+
+  orders        Order[]
+  purchases     UserLibrary[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+enum UserRole {
+  CLIENT
+  ADMIN
+}
+
+// Каталог учебных материалов
+model Product {
+  id              String         @id @default(cuid())
+  title           String
+  slug            String         @unique
+  description     String         @db.Text
+  price           Int            // в рублях
+  oldPrice        Int?           // зачеркнутая цена
+  
+  // Медиа: минимум 6 изображений 1024x1024 + файлы
+  images          String[]       // URL картинок 1024x1024 в S3
+  demoPdfUrl      String?        // Ссылка на публичное демо с водяными знаками
+  fullPdfS3Key    String         // Защищенный путь к оригиналу в S3
+  pagesCount      Int
+
+  // Состав комплекта (отмечает автор в админке, покупатель видит только отмеченное)
+  contents        MaterialContent[]
+
+  // Категоризация
+  category        CategoryType
+  
+  // Специфические фильтры
+  schoolGrades    Int[]          // [1, 2, 3.. 11] (для школы)
+  schoolSubject   String?        // Русский, Математика и т.д.
+  materialType    String?        // Рабочий лист, Квест, ВПР
+  
+  speechSounds    String[]       // ["Р", "Рь", "Л", "Ш"] (для логопедов)
+  targetAgeMin    Int?           // Мин. возраст (лет)
+  targetAgeMax    Int?           // Макс. возраст (лет)
+  
+  pecsCategory    String?        // Еда, Режим дня, Эмоции
+  pecsCardSize    String?        // 4x4, 5x5
+  
+  velcroTheme     String?        // Животные, Профессии, Формы
+  
+  isPublished     Boolean        @default(true)
+  orderBumps      Product[]      @relation("OrderBumpRelation")
+  bumpParents     Product[]      @relation("OrderBumpRelation")
+  
+  orderItems      OrderItem[]
+  libraryEntries  UserLibrary[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+enum MaterialContent {
+  LESSON_PLAN       // План-конспект
+  PRESENTATION      // Презентация
+  TEACHER_KEYS      // Ключи для учителя
+  WORKSHEET         // Рабочий лист
+  WORKSHEET_AB      // А/В рабочие листы (взаимоисключает WORKSHEET)
+  HANDOUT           // Раздаточный материал
+  TEST              // Контрольная работа
+  INDEPENDENT_WORK  // Самостоятельная работа
+  FIVE_MIN_CARDS    // Карточки-пятиминутки
+  COLOR_VERSION     // Цветной вариант
+  BW_VERSION        // Ч/Б вариант
+}
+
+enum CategoryType {
+  SCHOOL
+  SPEECH_THERAPY
+  PECS
+  VELCRO_GAMES
+}
+
+// Заказы и интеграция с ЮKassa
+model Order {
+  id              String        @id @default(cuid())
+  orderNumber     Int           @default(autoincrement())
+  userId          String?
+  user            User?         @relation(fields: [userId], references: [id])
+  
+  customerEmail   String
+  customerPhone   String?
+  
+  totalAmount     Int
+  status          OrderStatus   @default(PENDING)
+  
+  yooPaymentId    String?       @unique // ID платежа в ЮKassa
+  fiscalReceiptUrl String?      // Ссылка на чек
+  
+  items           OrderItem[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+}
+
+enum OrderStatus {
+  PENDING
+  SUCCEEDED
+  CANCELED
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id])
+  productId String
+  product   Product  @relation(fields: [productId], references: [id])
+  price     Int
+}
+
+// Вечный доступ к купленным файлам в ЛК
+model UserLibrary {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  downloadLog Int      @default(0) // Счетчик скачиваний
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, productId])
+}
